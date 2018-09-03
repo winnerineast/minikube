@@ -20,14 +20,15 @@ package integration
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
+	api "k8s.io/api/core/v1"
+	storage "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apis/storage"
 	commonutil "k8s.io/minikube/pkg/util"
 	"k8s.io/minikube/test/integration/util"
 )

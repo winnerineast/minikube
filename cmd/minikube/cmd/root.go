@@ -35,7 +35,6 @@ import (
 	"k8s.io/minikube/cmd/util"
 	"k8s.io/minikube/pkg/minikube/bootstrapper"
 	"k8s.io/minikube/pkg/minikube/bootstrapper/kubeadm"
-	"k8s.io/minikube/pkg/minikube/bootstrapper/localkube"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/notify"
@@ -47,7 +46,6 @@ var dirs = [...]string{
 	constants.MakeMiniPath("machines"),
 	constants.MakeMiniPath("cache"),
 	constants.MakeMiniPath("cache", "iso"),
-	constants.MakeMiniPath("cache", "localkube"),
 	constants.MakeMiniPath("config"),
 	constants.MakeMiniPath("addons"),
 	constants.MakeMiniPath("files"),
@@ -162,6 +160,9 @@ func setupViper() {
 	viper.SetDefault(config.WantReportError, false)
 	viper.SetDefault(config.WantReportErrorPrompt, true)
 	viper.SetDefault(config.WantKubectlDownloadMsg, true)
+	viper.SetDefault(config.WantNoneDriverWarning, true)
+	viper.SetDefault(config.ShowDriverDeprecationNotification, true)
+	viper.SetDefault(config.ShowBootstrapperDeprecationNotification, true)
 	setFlagsUsingViper()
 }
 
@@ -170,11 +171,6 @@ func GetClusterBootstrapper(api libmachine.API, bootstrapperName string) (bootst
 	var b bootstrapper.Bootstrapper
 	var err error
 	switch bootstrapperName {
-	case bootstrapper.BootstrapperTypeLocalkube:
-		b, err = localkube.NewLocalkubeBootstrapper(api)
-		if err != nil {
-			return nil, errors.Wrap(err, "getting localkube bootstrapper")
-		}
 	case bootstrapper.BootstrapperTypeKubeadm:
 		b, err = kubeadm.NewKubeadmBootstrapper(api)
 		if err != nil {

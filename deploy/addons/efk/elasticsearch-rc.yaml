@@ -34,12 +34,14 @@ spec:
     spec:
       containers:
       - name: elasticsearch-logging
-        image: gcr.io/google-containers/elasticsearch:v5.6.2
+        image: k8s.gcr.io/elasticsearch:v5.6.2
         resources:
           limits:
             cpu: 500m
+            memory: 2400Mi
           requests:
             cpu: 100m
+            memory: 2350Mi
         ports:
         - containerPort: 9200
           name: db
@@ -58,7 +60,7 @@ spec:
         - name: MINIMUM_MASTER_NODES
           value: "1"
       initContainers:
-      - image: alpine:3.6
+      - image: registry.hub.docker.com/library/alpine:3.6
         command: ["/sbin/sysctl", "-w", "vm.max_map_count=262144"]
         name: elasticsearch-logging-init
         securityContext:

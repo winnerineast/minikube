@@ -28,9 +28,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/docker/machine/drivers/virtualbox"
 	"github.com/docker/machine/libmachine"
-	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/engine"
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/mcnerror"
@@ -38,12 +36,17 @@ import (
 	"github.com/docker/machine/libmachine/state"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 
 	cfg "k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
-	pkgutil "k8s.io/minikube/pkg/util"
-
+	"k8s.io/minikube/pkg/minikube/registry"
 	"k8s.io/minikube/pkg/util"
+	pkgutil "k8s.io/minikube/pkg/util"
+)
+
+const (
+	defaultVirtualboxNicType = "virtio"
 )
 
 //This init function is used to set the logtostderr variable to false so that INFO level log info does not clutter the CLI
@@ -51,12 +54,13 @@ import (
 //see: https://github.com/kubernetes/kubernetes/blob/master/pkg/kubectl/util/logs/logs.go#L32-L34
 func init() {
 	flag.Set("logtostderr", "false")
+
 	// Setting the default client to native gives much better performance.
 	ssh.SetDefaultClient(ssh.Native)
 }
 
 // StartHost starts a host VM.
-func StartHost(api libmachine.API, config MachineConfig) (*host.Host, error) {
+func StartHost(api libmachine.API, config cfg.MachineConfig) (*host.Host, error) {
 	exists, err := api.Exists(cfg.GetMachineName())
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error checking if host exists: %s", cfg.GetMachineName())
@@ -165,7 +169,7 @@ func GetHostDriverIP(api libmachine.API) (net.IP, error) {
 	return ip, nil
 }
 
-func engineOptions(config MachineConfig) *engine.Options {
+func engineOptions(config cfg.MachineConfig) *engine.Options {
 	o := engine.Options{
 		Env:              config.DockerEnv,
 		InsecureRegistry: append([]string{pkgutil.DefaultServiceCIDR}, config.InsecureRegistry...),
@@ -175,19 +179,41 @@ func engineOptions(config MachineConfig) *engine.Options {
 	return &o
 }
 
-func createVirtualboxHost(config MachineConfig) drivers.Driver {
-	d := virtualbox.NewDriver(cfg.GetMachineName(), constants.GetMinipath())
-	d.Boot2DockerURL = config.Downloader.GetISOFileURI(config.MinikubeISO)
-	d.Memory = config.Memory
-	d.CPU = config.CPUs
-	d.DiskSize = int(config.DiskSize)
-	d.HostOnlyCIDR = config.HostOnlyCIDR
-	d.NoShare = config.DisableDriverMounts
-	return d
+func preCreateHost(config *cfg.MachineConfig) error {
+	switch config.VMDriver {
+	case "kvm":
+		if viper.GetBool(cfg.ShowDriverDeprecationNotification) {
+			fmt.Fprintln(os.Stderr, `WARNING: The kvm driver is now deprecated and support for it will be removed in a future release.
+				Please consider switching to the kvm2 driver, which is intended to replace the kvm driver.
+				See https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm2-driver for more information.
+				To disable this message, run [minikube config set WantShowDriverDeprecationNotification false]`)
+		}
+	case "xhyve":
+		if viper.GetBool(cfg.ShowDriverDeprecationNotification) {
+			fmt.Fprintln(os.Stderr, `WARNING: The xhyve driver is now deprecated and support for it will be removed in a future release.
+Please consider switching to the hyperkit driver, which is intended to replace the xhyve driver.
+See https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperkit-driver for more information.
+To disable this message, run [minikube config set WantShowDriverDeprecationNotification false]`)
+		}
+	}
+
+	return nil
 }
 
-func createHost(api libmachine.API, config MachineConfig) (*host.Host, error) {
-	var driver interface{}
+func createHost(api libmachine.API, config cfg.MachineConfig) (*host.Host, error) {
+	err := preCreateHost(&config)
+	if err != nil {
+		return nil, err
+	}
+
+	def, err := registry.Driver(config.VMDriver)
+	if err != nil {
+		if err == registry.ErrDriverNotFound {
+			glog.Exitf("Unsupported driver: %s\n", config.VMDriver)
+		} else {
+			glog.Exit(err.Error())
+		}
+	}
 
 	if config.VMDriver != "none" {
 		if err := config.Downloader.CacheMinikubeISOFromURL(config.MinikubeISO); err != nil {
@@ -195,24 +221,7 @@ func createHost(api libmachine.API, config MachineConfig) (*host.Host, error) {
 		}
 	}
 
-	switch config.VMDriver {
-	case "virtualbox":
-		driver = createVirtualboxHost(config)
-	case "vmwarefusion":
-		driver = createVMwareFusionHost(config)
-	case "kvm", "kvm2":
-		driver = createKVMHost(config)
-	case "xhyve":
-		driver = createXhyveHost(config)
-	case "hyperv":
-		driver = createHypervHost(config)
-	case "none":
-		driver = createNoneHost(config)
-	case "hyperkit":
-		driver = createHyperkitHost(config)
-	default:
-		glog.Exitf("Unsupported driver: %s\n", config.VMDriver)
-	}
+	driver := def.ConfigCreator(config)
 
 	data, err := json.Marshal(driver)
 	if err != nil {
@@ -291,6 +300,8 @@ func GetVMHostIP(host *host.Host) (net.IP, error) {
 	switch host.DriverName {
 	case "kvm":
 		return net.ParseIP("192.168.42.1"), nil
+	case "kvm2":
+		return net.ParseIP("192.168.39.1"), nil
 	case "hyperv":
 		re := regexp.MustCompile(`"VSwitch": "(.*?)",`)
 		// TODO(aprindle) Change this to deserialize the driver instead
@@ -301,7 +312,7 @@ func GetVMHostIP(host *host.Host) (net.IP, error) {
 		}
 		return ip, nil
 	case "virtualbox":
-		out, err := exec.Command(detectVBoxManageCmd(), "showvminfo", "minikube", "--machinereadable").Output()
+		out, err := exec.Command(detectVBoxManageCmd(), "showvminfo", host.Name, "--machinereadable").Output()
 		if err != nil {
 			return []byte{}, errors.Wrap(err, "Error running vboxmanage command")
 		}
@@ -312,7 +323,7 @@ func GetVMHostIP(host *host.Host) (net.IP, error) {
 			return []byte{}, errors.Wrap(err, "Error getting VM/Host IP address")
 		}
 		return ip, nil
-	case "xhyve":
+	case "xhyve", "hyperkit":
 		return net.ParseIP("192.168.64.1"), nil
 	default:
 		return []byte{}, errors.New("Error, attempted to get host ip address for unsupported driver")
@@ -372,7 +383,7 @@ func CreateSSHShell(api libmachine.API, args []string) error {
 }
 
 // EnsureMinikubeRunningOrExit checks that minikube has a status available and that
-// that the status is `Running`, otherwise it will exit
+// the status is `Running`, otherwise it will exit
 func EnsureMinikubeRunningOrExit(api libmachine.API, exitStatus int) {
 	s, err := GetHostStatus(api)
 	if err != nil {

@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/golang/glog"
+	"github.com/pkg/errors"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/util"
@@ -65,9 +65,9 @@ var Addons = map[string]*Addon{
 	}, true, "addon-manager"),
 	"dashboard": NewAddon([]*BinDataAsset{
 		NewBinDataAsset(
-			"deploy/addons/dashboard/dashboard-rc.yaml",
+			"deploy/addons/dashboard/dashboard-dp.yaml",
 			constants.AddonsPath,
-			"dashboard-rc.yaml",
+			"dashboard-dp.yaml",
 			"0640"),
 		NewBinDataAsset(
 			"deploy/addons/dashboard/dashboard-svc.yaml",
@@ -120,7 +120,7 @@ var Addons = map[string]*Addon{
 			constants.AddonsPath,
 			"coreDNS-clusterrole.yaml",
 			"0640"),
-	}, false, "coredns"),
+	}, true, "coredns"),
 	"kube-dns": NewAddon([]*BinDataAsset{
 		NewBinDataAsset(
 			"deploy/addons/kube-dns/kube-dns-controller.yaml",
@@ -137,7 +137,7 @@ var Addons = map[string]*Addon{
 			constants.AddonsPath,
 			"kube-dns-svc.yaml",
 			"0640"),
-	}, true, "kube-dns"),
+	}, false, "kube-dns"),
 	"heapster": NewAddon([]*BinDataAsset{
 		NewBinDataAsset(
 			"deploy/addons/heapster/influx-grafana-rc.yaml",
@@ -204,9 +204,9 @@ var Addons = map[string]*Addon{
 			"ingress-configmap.yaml",
 			"0640"),
 		NewBinDataAsset(
-			"deploy/addons/ingress/ingress-rc.yaml",
+			"deploy/addons/ingress/ingress-dp.yaml",
 			constants.AddonsPath,
-			"ingress-rc.yaml",
+			"ingress-dp.yaml",
 			"0640"),
 		NewBinDataAsset(
 			"deploy/addons/ingress/ingress-svc.yaml",
@@ -214,6 +214,23 @@ var Addons = map[string]*Addon{
 			"ingress-svc.yaml",
 			"0640"),
 	}, false, "ingress"),
+	"metrics-server": NewAddon([]*BinDataAsset{
+		NewBinDataAsset(
+			"deploy/addons/metrics-server/metrics-apiservice.yaml",
+			constants.AddonsPath,
+			"metrics-apiservice.yaml",
+			"0640"),
+		NewBinDataAsset(
+			"deploy/addons/metrics-server/metrics-server-deployment.yaml",
+			constants.AddonsPath,
+			"metrics-server-deployment.yaml",
+			"0640"),
+		NewBinDataAsset(
+			"deploy/addons/metrics-server/metrics-server-service.yaml",
+			constants.AddonsPath,
+			"metrics-server-service.yaml",
+			"0640"),
+	}, false, "metrics-server"),
 	"registry": NewAddon([]*BinDataAsset{
 		NewBinDataAsset(
 			"deploy/addons/registry/registry-rc.yaml",
@@ -233,24 +250,76 @@ var Addons = map[string]*Addon{
 			"registry-creds-rc.yaml",
 			"0640"),
 	}, false, "registry-creds"),
+	"freshpod": NewAddon([]*BinDataAsset{
+		NewBinDataAsset(
+			"deploy/addons/freshpod/freshpod-rc.yaml",
+			constants.AddonsPath,
+			"freshpod-rc.yaml",
+			"0640"),
+	}, false, "freshpod"),
+	"nvidia-driver-installer": NewAddon([]*BinDataAsset{
+		NewBinDataAsset(
+			"deploy/addons/gpu/nvidia-driver-installer.yaml",
+			constants.AddonsPath,
+			"nvidia-driver-installer.yaml",
+			"0640"),
+	}, false, "nvidia-driver-installer"),
+	"nvidia-gpu-device-plugin": NewAddon([]*BinDataAsset{
+		NewBinDataAsset(
+			"deploy/addons/gpu/nvidia-gpu-device-plugin.yaml",
+			constants.AddonsPath,
+			"nvidia-gpu-device-plugin.yaml",
+			"0640"),
+	}, false, "nvidia-gpu-device-plugin"),
 }
 
-func AddMinikubeDirToAssets(minipath string, vmpath string, assetList *[]CopyableFile) {
-	// loop over $MINIKUBE_HOME/minipath and add them to assets
-	searchDir := constants.MakeMiniPath(minipath)
-	err := filepath.Walk(searchDir, func(miniFile string, f os.FileInfo, err error) error {
-		isDir, err := util.IsDirectory(miniFile)
-		if err == nil && !isDir {
-			f, err := NewFileAsset(miniFile, vmpath, filepath.Base(miniFile), "0640")
-			if err == nil {
-				*assetList = append(*assetList, f)
-			}
-		} else if err != nil {
-			glog.Infoln(fmt.Sprintf("Error encountered while walking %s: ", searchDir), err)
+func AddMinikubeDirAssets(assets *[]CopyableFile) error {
+	if err := addMinikubeDirToAssets(constants.MakeMiniPath("addons"), constants.AddonsPath, assets); err != nil {
+		return errors.Wrap(err, "adding addons folder to assets")
+	}
+	if err := addMinikubeDirToAssets(constants.MakeMiniPath("files"), "", assets); err != nil {
+		return errors.Wrap(err, "adding files rootfs to assets")
+	}
+
+	return nil
+}
+
+// AddMinikubeDirToAssets adds all the files in the basedir argument to the list
+// of files to be copied to the vm.  If vmpath is left blank, the files will be
+// transferred to the location according to their relative minikube folder path.
+func addMinikubeDirToAssets(basedir, vmpath string, assets *[]CopyableFile) error {
+	err := filepath.Walk(basedir, func(hostpath string, info os.FileInfo, err error) error {
+		isDir, err := util.IsDirectory(hostpath)
+		if err != nil {
+			return errors.Wrapf(err, "checking if %s is directory", hostpath)
 		}
+		if !isDir {
+			if vmpath == "" {
+				rPath, err := filepath.Rel(basedir, hostpath)
+				if err != nil {
+					return errors.Wrap(err, "generating relative path")
+				}
+				rPath = filepath.Dir(rPath)
+				vmpath = filepath.Join("/", rPath)
+			}
+			permString := fmt.Sprintf("%o", info.Mode().Perm())
+			// The conversion will strip the leading 0 if present, so add it back
+			// if we need to.
+			if len(permString) == 3 {
+				permString = fmt.Sprintf("0%s", permString)
+			}
+
+			f, err := NewFileAsset(hostpath, vmpath, filepath.Base(hostpath), permString)
+			if err != nil {
+				return errors.Wrapf(err, "creating file asset for %s", hostpath)
+			}
+			*assets = append(*assets, f)
+		}
+
 		return nil
 	})
 	if err != nil {
-		glog.Infoln(fmt.Sprintf("Error encountered while walking %s: ", searchDir), err)
+		return errors.Wrap(err, "walking filepath")
 	}
+	return nil
 }

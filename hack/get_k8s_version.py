@@ -17,18 +17,37 @@
 "This package gets the LD flags used to set the version of kubernetes."
 
 import json
+import os
+import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 K8S_PACKAGE = 'k8s.io/kubernetes/'
 X_ARGS = ['-X k8s.io/minikube/vendor/k8s.io/kubernetes/pkg/version.', '-X k8s.io/minikube/vendor/k8s.io/client-go/pkg/version.']
 
-def get_rev():
+def get_commit():
   return 'gitCommit=%s' % get_from_godep('Rev')
 
 def get_version():
     return 'gitVersion=%s' % get_from_godep('Comment')
+
+def get_major_and_minor():
+    major = ''
+    minor = ''
+    version = get_from_godep('Comment')
+    # [kubernetes/hack/lib/version.sh]:
+    # Try to match the "git describe" output to a regex to try to extract
+    # the "major" and "minor" versions and whether this is the exact tagged
+    # version or whether the tree is between two tagged versions.
+    m = re.match('^v([0-9]+)\.([0-9]+)(\.[0-9]+)?([-].*)?$', version)
+    if m:
+        major = m.group(1)
+        minor = m.group(2)
+        if m.group(4):
+            minor += "+"
+    return ('gitMajor=%s' % major, 'gitMinor=%s' % minor)
 
 def get_from_godep(key):
   with open('./Godeps/Godeps.json') as f:
@@ -46,12 +65,15 @@ def get_tree_state():
   return 'gitTreeState=%s' % result
 
 def get_build_date():
-  return 'buildDate=%s' % datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+  build_date = datetime.utcfromtimestamp(int(os.environ.get('SOURCE_DATE_EPOCH', time.time())))
+  return 'buildDate=%s' % build_date.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 def main():
   if len(sys.argv) > 1 and sys.argv[1] == "--k8s-version-only":
       return get_from_godep('Comment')
-  args = [get_rev(), get_version(), get_tree_state(), get_build_date()]
+  major, minor = get_major_and_minor()
+  args = [get_commit(), get_tree_state(), get_version(),
+          major, minor, get_build_date()]
   ret = ''
   for xarg in X_ARGS:
     for arg in args:

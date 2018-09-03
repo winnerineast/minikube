@@ -34,11 +34,6 @@ import (
 	pkgdrivers "k8s.io/minikube/pkg/drivers"
 )
 
-const (
-	qemusystem                = "qemu:///system"
-	defaultPrivateNetworkName = "minikube-net"
-)
-
 type Driver struct {
 	*drivers.BaseDriver
 	*pkgdrivers.CommonDriver
@@ -70,9 +65,19 @@ type Driver struct {
 	// The randomly generated MAC Address
 	// If empty, a random MAC will be generated.
 	MAC string
+
+	// Whether to passthrough GPU devices from the host to the VM.
+	GPU bool
+
+	// XML that needs to be added to passthrough GPU devices.
+	DevicesXML string
 }
 
-const defaultNetworkName = "minikube-net"
+const (
+	qemusystem                = "qemu:///system"
+	defaultPrivateNetworkName = "minikube-net"
+	defaultNetworkName        = "default"
+)
 
 func NewDriver(hostName, storePath string) *Driver {
 	return &Driver{
@@ -257,6 +262,13 @@ func (d *Driver) Create() error {
 	if err != nil {
 		return errors.Wrap(err, "creating network")
 	}
+	if d.GPU {
+		log.Info("Creating devices...")
+		d.DevicesXML, err = getDevicesXML()
+		if err != nil {
+			return errors.Wrap(err, "creating devices")
+		}
+	}
 
 	log.Info("Setting up minikube home directory...")
 	if err := os.MkdirAll(d.ResolveStorePath("."), 0755); err != nil {
@@ -269,9 +281,9 @@ func (d *Driver) Create() error {
 			return err
 		}
 		mode := info.Mode()
-		if mode&0001 != 1 {
+		if mode&0011 != 1 {
 			log.Debugf("Setting executable bit set on %s", dir)
-			mode |= 0001
+			mode |= 0011
 			os.Chmod(dir, mode)
 		}
 	}

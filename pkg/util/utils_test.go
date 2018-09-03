@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
-	"k8s.io/minikube/pkg/minikube/constants"
 )
 
 // Returns a function that will return n errors, then return successfully forever.
@@ -92,29 +91,6 @@ type getTestArgs struct {
 	expectedError bool
 }
 
-func TestGetLocalkubeDownloadURL(t *testing.T) {
-	argsList := [...]getTestArgs{
-		{"v1.3.0",
-			"https://storage.googleapis.com/minikube/k8sReleases/v1.3.0/localkube-linux-amd64", false},
-		{"v1.3.3",
-			"https://storage.googleapis.com/minikube/k8sReleases/v1.3.3/localkube-linux-amd64", false},
-		{"http://www.example.com/my-localkube", "http://www.example.com/my-localkube", false},
-		{"abc", "", true},
-		{"1.2.3.4", "", true},
-	}
-	for _, args := range argsList {
-		url, err := GetLocalkubeDownloadURL(args.input, constants.LocalkubeLinuxFilename)
-		wasError := err != nil
-		if wasError != args.expectedError {
-			t.Errorf("GetLocalkubeDownloadURL Expected error was: %t, Actual Error was: %s",
-				args.expectedError, err)
-		}
-		if url != args.expected {
-			t.Errorf("GetLocalkubeDownloadURL: Expected %s, Actual: %s", args.expected, url)
-		}
-	}
-}
-
 var testSHAString = "test"
 
 func TestParseSHAFromURL(t *testing.T) {
@@ -161,4 +137,24 @@ Error 2`
 	if err := m.ToError(); err != nil {
 		t.Fatalf("Unexpected error: %s", err)
 	}
+}
+
+func TestGetBinaryDownloadURL(t *testing.T) {
+	testData := []struct {
+		version     string
+		platform    string
+		expectedURL string
+	}{
+		{"v0.0.1", "linux", "https://storage.googleapis.com/minikube/releases/v0.0.1/minikube-linux-amd64"},
+		{"v0.0.1", "darwin", "https://storage.googleapis.com/minikube/releases/v0.0.1/minikube-darwin-amd64"},
+		{"v0.0.1", "windows", "https://storage.googleapis.com/minikube/releases/v0.0.1/minikube-windows-amd64.exe"},
+	}
+
+	for _, tt := range testData {
+		url := GetBinaryDownloadURL(tt.version, tt.platform)
+		if url != tt.expectedURL {
+			t.Fatalf("Expected '%s' but got '%s'", tt.expectedURL, url)
+		}
+	}
+
 }

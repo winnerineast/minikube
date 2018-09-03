@@ -10,6 +10,9 @@
 
 * **Configuring Kubernetes** ([configuring_kubernetes.md](configuring_kubernetes.md)): Configuring different Kubernetes components in minikube
 
+* **Caching Images** ([cache.md](cache.md)): Caching non-minikube images in minikube
+
+* **GPUs** ([gpu.md](gpu.md)): Using NVIDIA GPUs on minikube
 
 ### Installation and debugging
 

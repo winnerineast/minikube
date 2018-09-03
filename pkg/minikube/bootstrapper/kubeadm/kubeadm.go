@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"crypto"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/blang/semver"
 	"github.com/docker/machine/libmachine"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/golang/glog"
@@ -67,21 +69,24 @@ func NewKubeadmBootstrapper(api libmachine.API) (*KubeadmBootstrapper, error) {
 
 //TODO(r2d4): This should most likely check the health of the apiserver
 func (k *KubeadmBootstrapper) GetClusterStatus() (string, error) {
-	statusCmd := `sudo systemctl is-active kubelet &>/dev/null && echo "Running" || echo "Stopped"`
+	statusCmd := `sudo systemctl is-active kubelet`
 	status, err := k.c.CombinedOutput(statusCmd)
 	if err != nil {
 		return "", errors.Wrap(err, "getting status")
 	}
-	status = strings.TrimSpace(status)
-	if status == state.Running.String() || status == state.Stopped.String() {
-		return status, nil
+	s := strings.TrimSpace(status)
+	switch s {
+	case "active":
+		return state.Running.String(), nil
+	case "inactive":
+		return state.Stopped.String(), nil
 	}
-	return "", fmt.Errorf("Error: Unrecognized output from ClusterStatus: %s", status)
+	return state.Error.String(), nil
 }
 
 // TODO(r2d4): Should this aggregate all the logs from the control plane?
 // Maybe subcommands for each component? minikube logs apiserver?
-func (k *KubeadmBootstrapper) GetClusterLogs(follow bool) (string, error) {
+func (k *KubeadmBootstrapper) GetClusterLogsTo(follow bool, out io.Writer) error {
 	var flags []string
 	if follow {
 		flags = append(flags, "-f")
@@ -89,36 +94,53 @@ func (k *KubeadmBootstrapper) GetClusterLogs(follow bool) (string, error) {
 	logsCommand := fmt.Sprintf("sudo journalctl %s -u kubelet", strings.Join(flags, " "))
 
 	if follow {
-		if err := k.c.Run(logsCommand); err != nil {
-			return "", errors.Wrap(err, "getting shell")
+		if err := k.c.CombinedOutputTo(logsCommand, out); err != nil {
+			return errors.Wrap(err, "getting cluster logs")
 		}
-	}
+	} else {
 
-	logs, err := k.c.CombinedOutput(logsCommand)
-	if err != nil {
-		return "", errors.Wrap(err, "getting cluster logs")
+		logs, err := k.c.CombinedOutput(logsCommand)
+		if err != nil {
+			return errors.Wrap(err, "getting cluster logs")
+		}
+		fmt.Fprint(out, logs)
 	}
-
-	return logs, nil
+	return nil
 }
 
-func (k *KubeadmBootstrapper) StartCluster(k8s bootstrapper.KubernetesConfig) error {
-	// We use --skip-preflight-checks since we have our own custom addons
-	// that we also stick in /etc/kubernetes/manifests
+func (k *KubeadmBootstrapper) StartCluster(k8s config.KubernetesConfig) error {
+	version, err := ParseKubernetesVersion(k8s.KubernetesVersion)
+	if err != nil {
+		return errors.Wrap(err, "parsing kubernetes version")
+	}
+
 	b := bytes.Buffer{}
-	if err := kubeadmInitTemplate.Execute(&b, struct{ KubeadmConfigFile string }{constants.KubeadmConfigFile}); err != nil {
+	templateContext := struct {
+		KubeadmConfigFile   string
+		SkipPreflightChecks bool
+		Preflights          []string
+	}{
+		KubeadmConfigFile: constants.KubeadmConfigFile,
+		SkipPreflightChecks: !VersionIsBetween(version,
+			semver.MustParse("1.9.0-alpha.0"),
+			semver.Version{}),
+		Preflights: constants.Preflights,
+	}
+	if err := kubeadmInitTemplate.Execute(&b, templateContext); err != nil {
 		return err
 	}
 
-	err := k.c.Run(b.String())
+	out, err := k.c.CombinedOutput(b.String())
 	if err != nil {
-		return errors.Wrapf(err, "kubeadm init error running command: %s", b.String())
+		return errors.Wrapf(err, "kubeadm init error %s running command: %s", b.String(), out)
 	}
 
-	//TODO(r2d4): get rid of global here
-	master = k8s.NodeName
-	if err := util.RetryAfter(100, unmarkMaster, time.Millisecond*500); err != nil {
-		return errors.Wrap(err, "timed out waiting to unmark master")
+	if version.LT(semver.MustParse("1.10.0-alpha.0")) {
+		//TODO(r2d4): get rid of global here
+		master = k8s.NodeName
+		if err := util.RetryAfter(200, unmarkMaster, time.Second*1); err != nil {
+			return errors.Wrap(err, "timed out waiting to unmark master")
+		}
 	}
 
 	if err := util.RetryAfter(100, elevateKubeSystemPrivileges, time.Millisecond*500); err != nil {
@@ -128,11 +150,12 @@ func (k *KubeadmBootstrapper) StartCluster(k8s bootstrapper.KubernetesConfig) er
 	return nil
 }
 
-//TODO(r2d4): Split out into shared function between localkube and kubeadm
 func addAddons(files *[]assets.CopyableFile) error {
 	// add addons to file list
 	// custom addons
-	assets.AddMinikubeDirToAssets("addons", constants.AddonsPath, files)
+	if err := assets.AddMinikubeDirAssets(files); err != nil {
+		return errors.Wrap(err, "adding minikube dir assets")
+	}
 	// bundled addons
 	for addonName, addonBundle := range assets.Addons {
 		// TODO(r2d4): Kubeadm ignores the kube-dns addon and uses its own.
@@ -152,7 +175,7 @@ func addAddons(files *[]assets.CopyableFile) error {
 	return nil
 }
 
-func (k *KubeadmBootstrapper) RestartCluster(k8s bootstrapper.KubernetesConfig) error {
+func (k *KubeadmBootstrapper) RestartCluster(k8s config.KubernetesConfig) error {
 	opts := struct {
 		KubeadmConfigFile string
 	}{
@@ -175,7 +198,7 @@ func (k *KubeadmBootstrapper) RestartCluster(k8s bootstrapper.KubernetesConfig) 
 	return nil
 }
 
-func (k *KubeadmBootstrapper) SetupCerts(k8s bootstrapper.KubernetesConfig) error {
+func (k *KubeadmBootstrapper) SetupCerts(k8s config.KubernetesConfig) error {
 	return bootstrapper.SetupCerts(k.c, k8s)
 }
 
@@ -196,8 +219,13 @@ func SetContainerRuntime(cfg map[string]string, runtime string) map[string]strin
 	switch runtime {
 	case "crio", "cri-o":
 		cfg["container-runtime"] = "remote"
-		cfg["container-runtime-endpoint"] = "/var/run/crio.sock"
-		cfg["image-service-endpoint"] = "/var/run/crio.sock"
+		cfg["container-runtime-endpoint"] = "/var/run/crio/crio.sock"
+		cfg["image-service-endpoint"] = "/var/run/crio/crio.sock"
+		cfg["runtime-request-timeout"] = "15m"
+	case "containerd":
+		cfg["container-runtime"] = "remote"
+		cfg["container-runtime-endpoint"] = "unix:///run/containerd/containerd.sock"
+		cfg["image-service-endpoint"] = "unix:///run/containerd/containerd.sock"
 		cfg["runtime-request-timeout"] = "15m"
 	default:
 		cfg["container-runtime"] = runtime
@@ -208,7 +236,7 @@ func SetContainerRuntime(cfg map[string]string, runtime string) map[string]strin
 
 // NewKubeletConfig generates a new systemd unit containing a configured kubelet
 // based on the options present in the KubernetesConfig.
-func NewKubeletConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
+func NewKubeletConfig(k8s config.KubernetesConfig) (string, error) {
 	version, err := ParseKubernetesVersion(k8s.KubernetesVersion)
 	if err != nil {
 		return "", errors.Wrap(err, "parsing kubernetes version")
@@ -221,6 +249,13 @@ func NewKubeletConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
 
 	extraOpts = SetContainerRuntime(extraOpts, k8s.ContainerRuntime)
 	extraFlags := convertToFlags(extraOpts)
+
+	// parses a map of the feature gates for kubelet
+	_, kubeletFeatureArgs, err := ParseFeatureArgs(k8s.FeatureGates)
+	if err != nil {
+		return "", errors.Wrap(err, "parses feature gate config for kubelet")
+	}
+
 	b := bytes.Buffer{}
 	opts := struct {
 		ExtraOptions     string
@@ -228,7 +263,7 @@ func NewKubeletConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
 		ContainerRuntime string
 	}{
 		ExtraOptions:     extraFlags,
-		FeatureGates:     k8s.FeatureGates,
+		FeatureGates:     kubeletFeatureArgs,
 		ContainerRuntime: k8s.ContainerRuntime,
 	}
 	if err := kubeletSystemdTemplate.Execute(&b, opts); err != nil {
@@ -238,11 +273,14 @@ func NewKubeletConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
 	return b.String(), nil
 }
 
-func (k *KubeadmBootstrapper) UpdateCluster(cfg bootstrapper.KubernetesConfig) error {
+func (k *KubeadmBootstrapper) UpdateCluster(cfg config.KubernetesConfig) error {
 	if cfg.ShouldLoadCachedImages {
-		// Make best effort to load any cached images
-		go machine.LoadImages(k.c, constants.GetKubeadmCachedImages(cfg.KubernetesVersion), constants.ImageCacheDir)
+		err := machine.LoadImages(k.c, constants.GetKubeadmCachedImages(cfg.KubernetesVersion), constants.ImageCacheDir)
+		if err != nil {
+			return errors.Wrap(err, "loading cached images")
+		}
 	}
+
 	kubeadmCfg, err := generateConfig(cfg)
 	if err != nil {
 		return errors.Wrap(err, "generating kubeadm cfg")
@@ -259,15 +297,6 @@ func (k *KubeadmBootstrapper) UpdateCluster(cfg bootstrapper.KubernetesConfig) e
 		assets.NewMemoryAssetTarget([]byte(kubeadmCfg), constants.KubeadmConfigFile, "0640"),
 	}
 
-	if err := addAddons(&files); err != nil {
-		return errors.Wrap(err, "adding addons to copyable files")
-	}
-
-	for _, f := range files {
-		if err := k.c.Copy(f); err != nil {
-			return errors.Wrapf(err, "transferring kubeadm file: %+v", f)
-		}
-	}
 	var g errgroup.Group
 	for _, bin := range []string{"kubelet", "kubeadm"} {
 		bin := bin
@@ -290,6 +319,16 @@ func (k *KubeadmBootstrapper) UpdateCluster(cfg bootstrapper.KubernetesConfig) e
 		return errors.Wrap(err, "downloading binaries")
 	}
 
+	if err := addAddons(&files); err != nil {
+		return errors.Wrap(err, "adding addons to copyable files")
+	}
+
+	for _, f := range files {
+		if err := k.c.Copy(f); err != nil {
+			return errors.Wrapf(err, "transferring kubeadm file: %+v", f)
+		}
+	}
+
 	err = k.c.Run(`
 sudo systemctl daemon-reload &&
 sudo systemctl enable kubelet &&
@@ -302,14 +341,20 @@ sudo systemctl start kubelet
 	return nil
 }
 
-func generateConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
+func generateConfig(k8s config.KubernetesConfig) (string, error) {
 	version, err := ParseKubernetesVersion(k8s.KubernetesVersion)
 	if err != nil {
 		return "", errors.Wrap(err, "parsing kubernetes version")
 	}
 
+	// parses a map of the feature gates for kubeadm and component
+	kubeadmFeatureArgs, componentFeatureArgs, err := ParseFeatureArgs(k8s.FeatureGates)
+	if err != nil {
+		return "", errors.Wrap(err, "parses feature gate config for kubeadm and component")
+	}
+
 	// generates a map of component to extra args for apiserver, controller-manager, and scheduler
-	extraComponentConfig, err := NewComponentExtraArgs(k8s.ExtraOptions, version, k8s.FeatureGates)
+	extraComponentConfig, err := NewComponentExtraArgs(k8s.ExtraOptions, version, componentFeatureArgs)
 	if err != nil {
 		return "", errors.Wrap(err, "generating extra component config for kubeadm")
 	}
@@ -323,15 +368,23 @@ func generateConfig(k8s bootstrapper.KubernetesConfig) (string, error) {
 		EtcdDataDir       string
 		NodeName          string
 		ExtraArgs         []ComponentExtraArgs
+		FeatureArgs       map[string]bool
+		NoTaintMaster     bool
 	}{
 		CertDir:           util.DefaultCertPath,
 		ServiceCIDR:       util.DefaultServiceCIDR,
 		AdvertiseAddress:  k8s.NodeIP,
 		APIServerPort:     util.APIServerPort,
 		KubernetesVersion: k8s.KubernetesVersion,
-		EtcdDataDir:       "/data", //TODO(r2d4): change to something else persisted
+		EtcdDataDir:       "/data/minikube", //TODO(r2d4): change to something else persisted
 		NodeName:          k8s.NodeName,
 		ExtraArgs:         extraComponentConfig,
+		FeatureArgs:       kubeadmFeatureArgs,
+		NoTaintMaster:     false,
+	}
+
+	if version.GTE(semver.MustParse("1.10.0-alpha.0")) {
+		opts.NoTaintMaster = true
 	}
 
 	b := bytes.Buffer{}

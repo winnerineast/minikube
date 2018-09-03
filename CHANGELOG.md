@@ -1,5 +1,92 @@
 # Minikube Release Notes
 
+# Version 0.28.2 - 7/20/2018
+* Nvidia driver installation fixed [#2996](https://github.com/kubernetes/minikube/pull/2986)
+
+# Version 0.28.1 - 7/16/2018
+* vboxsf Host Mounting fixed (Linux Kernel version downgraded to 4.15 from 4.16) [#2986](https://github.com/kubernetes/minikube/pull/2986)
+* cri-tools udpated to 1.11.1 [#2986](https://github.com/kubernetes/minikube/pull/2986)
+* Feature Gates support added to kubeadm bootstrapper [#2951](https://github.com/kubernetes/minikube/pull/2951)
+* Kubernetes 1.11 build support added [#2943](https://github.com/kubernetes/minikube/pull/2943)
+* GPU support for kvm2 driver added [#2936](https://github.com/kubernetes/minikube/pull/2936)
+* nginx ingress controller updated to 0.16.2 [#2930](https://github.com/kubernetes/minikube/pull/2930)
+* heketi and gluster dependencies added to minikube ISO [#2925](https://github.com/kubernetes/minikube/pull/2925)
+
+# Version 0.28.0 - 6/12/2018
+* Minikube status command fixes [#2894](https://github.com/kubernetes/minikube/pull/2894)
+* Boot changes to support virsh console [#2887](https://github.com/kubernetes/minikube/pull/2887)
+* ISO changes to update to Linux 4.16 [#2883](https://github.com/kubernetes/minikube/pull/2883)
+* ISO changes to support openvswitch/vxlan [#2876](https://github.com/kubernetes/minikube/pull/2876)
+* Docker API version bumped to 1.35 [#2867](https://github.com/kubernetes/minikube/pull/2867)
+* Added hyperkit options for enterprise VPN support [#2850](https://github.com/kubernetes/minikube/pull/2850)
+* Caching correct images for k8s version [#2849](https://github.com/kubernetes/minikube/pull/2849)
+* Cache images feature made synchronous, off by default [#2847](https://github.com/kubernetes/minikube/pull/2847)
+* CoreDNS updated to 1.1.3 [#2836](https://github.com/kubernetes/minikube/pull/2836)
+* Heapster updated to 1.5.3 [#2821](https://github.com/kubernetes/minikube/pull/2821)
+* Fix for clock skew in certificate creation [#2823](https://github.com/kubernetes/minikube/pull/2823)
+
+# Version 0.27.0 - 5/14/2018
+* Start the default network for the kvm2 driver [#2806](https://github.com/kubernetes/minikube/pull/2806)
+* Fix 1.9.x versions of Kubernetes with the kubeadm bootstrapper [#2791](https://github.com/kubernetes/minikube/pull/2791)
+* Switch the ingress addon from an RC to a Deployment [#2788](https://github.com/kubernetes/minikube/pull/2788)
+* Update nginx ingress controller to 0.14.0 [#2780](https://github.com/kubernetes/minikube/pull/2780)
+* Disable dnsmasq on network for kvm driver [#2745](https://github.com/kubernetes/minikube/pull/2745)
+
+# Version 0.26.1 - 4/17/2018
+* Mark hyperkit, kvm2 and none drivers as supported [#2734](https://github.com/kubernetes/minikube/pull/2723) and [#2728](https://github.com/kubernetes/minikube/pull/2728)
+* Bug fix for hyper-v driver [#2719](https://github.com/kubernetes/minikube/pull/2719)
+* Add back CRI preflight ignore [#2723](https://github.com/kubernetes/minikube/pull/2723)
+* Fix preflight checks on clusters <1.9 [#2721](https://github.com/kubernetes/minikube/pull/2721)
+
+# Version 0.26.0 - 4/3/2018
+* Update to Kubernetes 1.10 [#2657](https://github.com/kubernetes/minikube/pull/2657)
+* Update Nginx Ingress Plugin to 0.12.0 [#2644](https://github.com/kubernetes/minikube/pull/2644)
+* [Minikube ISO] Add SSHFS Support to the Minikube ISO [#2600](https://github.com/kubernetes/minikube/pull/2600)
+* Upgrade Docker to 17.12 [#2597](https://github.com/kubernetes/minikube/pull/2597)
+* Deactivate HSTS in Ingress by default [#2591](https://github.com/kubernetes/minikube/pull/2591)
+* Add ValidatingAdmissionWebhook admission controller [#2590](https://github.com/kubernetes/minikube/pull/2590)
+* Upgrade docker-machine to fix Hyper-v name conflict [#2586](https://github.com/kubernetes/minikube/pull/2586)
+* Upgrade Core DNS Addon to 1.0.6 [#2584](https://github.com/kubernetes/minikube/pull/2584)
+* Add metrics server Addon [#2566](https://github.com/kubernetes/minikube/pull/2566)
+* Allow nesting in KVM driver [#2555](https://github.com/kubernetes/minikube/pull/2555)
+* Add MutatingAdmissionWebhook admission controller [#2547](https://github.com/kubernetes/minikube/pull/2547)
+* [Minikube ISO] Add Netfilter module to the ISO for Calico [#2490](https://github.com/kubernetes/minikube/pull/2490)
+* Add memory and request limit to EFK Addon [#2465](https://github.com/kubernetes/minikube/pull/2465)
+
+# Version 0.25.0 - 1/26/2018
+* Add freshpod addon [#2423](https://github.com/kubernetes/minikube/pull/2423)
+* List addons in consistent sort order [#2446](https://github.com/kubernetes/minikube/pull/2446)
+* [Minikube ISO] Upgrade Docker to 17.09 [#2427](https://github.com/kubernetes/minikube/pull/2427)
+* [Minikube ISO] Change cri-o socket location to upstream default [#2262](https://github.com/kubernetes/minikube/pull/2262)
+* [Minikube ISO] Update crio to v1.0.3 [#2311](https://github.com/kubernetes/minikube/pull/2311)
+* Change Dashboard from Replication Controller to Deployment [#2409](https://github.com/kubernetes/minikube/pull/2409)
+* Upgrade kube-addon-manager to v6.5 [#2400](https://github.com/kubernetes/minikube/pull/2400)
+* Upgrade heapster to v1.5.0 [#2335](https://github.com/kubernetes/minikube/pull/2335)
+* Upgrade ingress controller to v0.9.0 [#2292](https://github.com/kubernetes/minikube/pull/2292)
+* Upgrade docker machine to g49dfaa70 [#2299](https://github.com/kubernetes/minikube/pull/2299)
+* Added ingress integration tests [#2254](https://github.com/kubernetes/minikube/pull/2254)
+* Converted image registries to k8s.gcr.io [#2356](https://github.com/kubernetes/minikube/pull/2356)
+* Added cache list command [#2272](https://github.com/kubernetes/minikube/pull/2272)
+* Upgrade to Kubernetes 1.9 [#2343](https://github.com/kubernetes/minikube/pull/2343)
+* [hyperkit] Support NFS Sharing [#2337](https://github.com/kubernetes/minikube/pull/2337)
+
+# Version 0.24.1 - 11/30/2017
+* Add checksum verification for localkube
+* Bump minikube iso to v0.23.6
+
+# Version 0.24.0 - 11/29/2017
+* Deprecated xhyve and kvm drivers [#2227](https://github.com/kubernetes/minikube/pull/2227)
+* Added support for a "rootfs" layer in .minikube/files [#2110](https://github.com/kubernetes/minikube/pull/2110)
+* Added a `cache` command to cache non-minikube images [#2203](https://github.com/kubernetes/minikube/pull/2203)
+* Updated Dashboard addon to v1.8.0 [#2223](https://github.com/kubernetes/minikube/pull/2223)
+* Switched the virtualbox driver to use virtio networking [#2211](https://github.com/kubernetes/minikube/pull/2211)
+* Better error message in hyperkit driver [#2215](https://github.com/kubernetes/minikube/pull/2215)
+* Update heapster addon to v1.5.0 [#2182](https://github.com/kubernetes/minikube/pull/2182)
+* Moved the storage provisioner to run in a pod [#2137](https://github.com/kubernetes/minikube/pull/2137)
+* Added support for tcp and udp services to the ingress addon [#2142](https://github.com/kubernetes/minikube/pull/2142)
+* Bug fix to use the minikube context instead of the current kubectl context [#2128](https://github.com/kubernetes/minikube/pull/2128)
+* Added zsh autocompletion [#2194](https://github.com/kubernetes/minikube/pull/2194)
+
 # Version 0.23.0 - 10/26/2017
 * Upgraded to go 1.9 [#2113](https://github.com/kubernetes/minikube/pull/2113)
 * Localkube is no longer packaged in minikube bin-data [#2089](https://github.com/kubernetes/minikube/pull/2089)
@@ -85,7 +172,7 @@
 * Added `minikube update-context` command [#1578](https://github.com/kubernetes/minikube/pull/1578)
 * Added kubeconfig context and minikube ip to `minikube status` [#1578](https://github.com/kubernetes/minikube/pull/1578)
 * Use native golang ssh [#1571](https://github.com/kubernetes/minikube/pull/1571)
-* Don't treat stopping stoppped hosts as error [#1606](https://github.com/kubernetes/minikube/pull/1606)
+* Don't treat stopping stopped hosts as error [#1606](https://github.com/kubernetes/minikube/pull/1606)
 * Bumped ingress addon to 0.9-beta.8
 * Removed systemd dependency for None driver [#1592](https://github.com/kubernetes/minikube/pull/1592)
 

@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/minikube/pkg/minikube/assets"
+	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/util"
 	"k8s.io/minikube/pkg/util/kubeconfig"
@@ -41,7 +42,7 @@ var (
 )
 
 // SetupCerts gets the generated credentials required to talk to the APIServer.
-func SetupCerts(cmd CommandRunner, k8s KubernetesConfig) error {
+func SetupCerts(cmd CommandRunner, k8s config.KubernetesConfig) error {
 	localPath := constants.GetMinipath()
 	glog.Infof("Setting up certificates for IP: %s\n", k8s.NodeIP)
 
@@ -81,7 +82,7 @@ func SetupCerts(cmd CommandRunner, k8s KubernetesConfig) error {
 	}
 
 	kubeCfgFile := assets.NewMemoryAsset(data,
-		util.DefaultLocalkubeDirectory, "kubeconfig", "0644")
+		util.DefaultMinikubeDirectory, "kubeconfig", "0644")
 	copyableFiles = append(copyableFiles, kubeCfgFile)
 
 	for _, f := range copyableFiles {
@@ -92,7 +93,7 @@ func SetupCerts(cmd CommandRunner, k8s KubernetesConfig) error {
 	return nil
 }
 
-func generateCerts(k8s KubernetesConfig) error {
+func generateCerts(k8s config.KubernetesConfig) error {
 	serviceIP, err := util.GetServiceClusterIP(k8s.ServiceCIDR)
 	if err != nil {
 		return errors.Wrap(err, "getting service cluster ip")
@@ -114,7 +115,7 @@ func generateCerts(k8s KubernetesConfig) error {
 		{ // client / apiserver CA
 			certPath: caCertPath,
 			keyPath:  caKeyPath,
-			subject:  k8s.APIServerName,
+			subject:  "minikubeCA",
 		},
 		{ // proxy-client CA
 			certPath: proxyClientCACertPath,
@@ -122,6 +123,14 @@ func generateCerts(k8s KubernetesConfig) error {
 			subject:  "proxyClientCA",
 		},
 	}
+
+	apiServerIPs := append(
+		k8s.APIServerIPs,
+		[]net.IP{net.ParseIP(k8s.NodeIP), serviceIP, net.ParseIP("10.0.0.1")}...)
+	apiServerNames := append(k8s.APIServerNames, k8s.APIServerName)
+	apiServerAlternateNames := append(
+		apiServerNames,
+		util.GetAlternateDNS(k8s.DNSDomain)...)
 
 	signedCertSpecs := []struct {
 		certPath       string
@@ -145,8 +154,8 @@ func generateCerts(k8s KubernetesConfig) error {
 			certPath:       filepath.Join(localPath, "apiserver.crt"),
 			keyPath:        filepath.Join(localPath, "apiserver.key"),
 			subject:        "minikube",
-			ips:            []net.IP{net.ParseIP(k8s.NodeIP), serviceIP, net.ParseIP("10.0.0.1")},
-			alternateNames: util.GetAlternateDNS(k8s.DNSDomain),
+			ips:            apiServerIPs,
+			alternateNames: apiServerAlternateNames,
 			caCertPath:     caCertPath,
 			caKeyPath:      caKeyPath,
 		},

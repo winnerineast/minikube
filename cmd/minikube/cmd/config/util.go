@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/minikube/pkg/minikube/assets"
@@ -57,6 +58,21 @@ func findSetting(name string) (Setting, error) {
 
 func SetString(m config.MinikubeConfig, name string, val string) error {
 	m[name] = val
+	return nil
+}
+
+func SetMap(m config.MinikubeConfig, name string, val map[string]interface{}) error {
+	m[name] = val
+	return nil
+}
+
+func SetConfigMap(m config.MinikubeConfig, name string, val string) error {
+	list := strings.Split(val, ",")
+	v := make(map[string]interface{})
+	for _, s := range list {
+		v[s] = nil
+	}
+	m[name] = v
 	return nil
 }
 
@@ -109,13 +125,13 @@ func EnableOrDisableAddon(name string, val string) error {
 	if enable {
 		for _, addon := range addon.Assets {
 			if err := cmd.Copy(addon); err != nil {
-				return errors.Wrapf(err, "error enabling addon %s: %s", addon.AssetName)
+				return errors.Wrapf(err, "error enabling addon %s", addon.AssetName)
 			}
 		}
 	} else {
 		for _, addon := range addon.Assets {
 			if err := cmd.Remove(addon); err != nil {
-				return errors.Wrapf(err, "error disabling addon %s: %s", addon.AssetName)
+				return errors.Wrapf(err, "error disabling addon %s", addon.AssetName)
 			}
 		}
 	}

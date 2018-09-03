@@ -28,16 +28,18 @@ import (
 	"github.com/pkg/browser"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"text/template"
 
+	"github.com/spf13/viper"
 	"k8s.io/apimachinery/pkg/labels"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/minikube/pkg/minikube/cluster"
+	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/util"
 )
 
@@ -64,18 +66,19 @@ func (k *K8sClientGetter) GetCoreClient() (corev1.CoreV1Interface, error) {
 
 func (*K8sClientGetter) GetClientset() (*kubernetes.Clientset, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	profile := viper.GetString(config.MachineProfile)
 	configOverrides := &clientcmd.ConfigOverrides{
 		Context: clientcmdapi.Context{
-			Cluster:  "minikube",
-			AuthInfo: "minikube",
+			Cluster:  profile,
+			AuthInfo: profile,
 		},
 	}
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-	config, err := kubeConfig.ClientConfig()
+	clientConfig, err := kubeConfig.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("Error creating kubeConfig: %s", err)
 	}
-	client, err := kubernetes.NewForConfig(config)
+	client, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating new client from kubeConfig.ClientConfig()")
 	}
@@ -92,7 +95,7 @@ type ServiceURL struct {
 type ServiceURLs []ServiceURL
 
 // Returns all the node port URLs for every service in a particular namespace
-// Accepts a template for formating
+// Accepts a template for formatting
 func GetServiceURLs(api libmachine.API, namespace string, t *template.Template) (ServiceURLs, error) {
 	host, err := cluster.CheckIfApiExistsAndLoad(api)
 	if err != nil {
@@ -111,7 +114,7 @@ func GetServiceURLs(api libmachine.API, namespace string, t *template.Template) 
 
 	serviceInterface := client.Services(namespace)
 
-	svcs, err := serviceInterface.List(meta_v1.ListOptions{})
+	svcs, err := serviceInterface.List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +158,7 @@ func printURLsForService(c corev1.CoreV1Interface, ip, service, namespace string
 	}
 
 	s := c.Services(namespace)
-	svc, err := s.Get(service, meta_v1.GetOptions{})
+	svc, err := s.Get(service, metav1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "service '%s' could not be found running", service)
 	}
@@ -208,14 +211,14 @@ func CheckService(namespace string, service string) error {
 }
 
 func validateService(s corev1.ServiceInterface, service string) error {
-	if _, err := s.Get(service, meta_v1.GetOptions{}); err != nil {
+	if _, err := s.Get(service, metav1.GetOptions{}); err != nil {
 		return errors.Wrapf(err, "Error getting service %s", service)
 	}
 	return nil
 }
 
 func checkEndpointReady(endpoints corev1.EndpointsInterface, service string) error {
-	endpoint, err := endpoints.Get(service, meta_v1.GetOptions{})
+	endpoint, err := endpoints.Get(service, metav1.GetOptions{})
 	if err != nil {
 		return &util.RetriableError{Err: errors.Errorf("Error getting endpoints for service %s", service)}
 	}
@@ -271,7 +274,7 @@ func GetServiceListByLabel(namespace string, key string, value string) (*v1.Serv
 
 func getServiceListFromServicesByLabel(services corev1.ServiceInterface, key string, value string) (*v1.ServiceList, error) {
 	selector := labels.SelectorFromSet(labels.Set(map[string]string{key: value}))
-	serviceList, err := services.List(meta_v1.ListOptions{LabelSelector: selector.String()})
+	serviceList, err := services.List(metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		return &v1.ServiceList{}, &util.RetriableError{Err: err}
 	}
@@ -290,7 +293,7 @@ func CreateSecret(namespace, name string, dataValues map[string]string, labels m
 		return &util.RetriableError{Err: err}
 	}
 
-	secret, _ := secrets.Get(name, meta_v1.GetOptions{})
+	secret, _ := secrets.Get(name, metav1.GetOptions{})
 
 	// Delete existing secret
 	if len(secret.Name) > 0 {
@@ -308,7 +311,7 @@ func CreateSecret(namespace, name string, dataValues map[string]string, labels m
 
 	// Create Secret
 	secretObj := &v1.Secret{
-		ObjectMeta: meta_v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
@@ -337,7 +340,7 @@ func DeleteSecret(namespace, name string) error {
 		return &util.RetriableError{Err: err}
 	}
 
-	err = secrets.Delete(name, &meta_v1.DeleteOptions{})
+	err = secrets.Delete(name, &metav1.DeleteOptions{})
 	if err != nil {
 		return &util.RetriableError{Err: err}
 	}

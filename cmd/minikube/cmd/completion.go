@@ -41,7 +41,7 @@ const longDescription = `
 		$ apt-get install bash-completion
 		$ source /etc/bash-completion
 		$ source <(minikube completion bash) # for bash users
-		$ source <(minikube completion bash) # for zsh users
+		$ source <(minikube completion zsh) # for zsh users
 
 	Additionally, you may want to output the completion to a file and source in your .bashrc
 
@@ -107,6 +107,8 @@ func GenerateBashCompletion(w io.Writer, cmd *cobra.Command) error {
 
 func GenerateZshCompletion(out io.Writer, cmd *cobra.Command) error {
 	zsh_initialization := `
+#compdef minikube
+
 __minikube_bash_source() {
 	alias shopt=':'
 	alias _expand=_bash_expand

@@ -36,8 +36,8 @@ var (
 // logsCmd represents the logs command
 var logsCmd = &cobra.Command{
 	Use:   "logs",
-	Short: "Gets the logs of the running localkube instance, used for debugging minikube, not user code",
-	Long:  `Gets the logs of the running localkube instance, used for debugging minikube, not user code.`,
+	Short: "Gets the logs of the running instance, used for debugging minikube, not user code",
+	Long:  `Gets the logs of the running instance, used for debugging minikube, not user code.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		api, err := machine.NewAPIClient()
 		if err != nil {
@@ -50,12 +50,11 @@ var logsCmd = &cobra.Command{
 			glog.Exitf("Error getting cluster bootstrapper: %s", err)
 		}
 
-		s, err := clusterBootstrapper.GetClusterLogs(follow)
+		err = clusterBootstrapper.GetClusterLogsTo(follow, os.Stdout)
 		if err != nil {
 			log.Println("Error getting machine logs:", err)
 			cmdUtil.MaybeReportErrorAndExit(err)
 		}
-		fmt.Fprintln(os.Stdout, s)
 	},
 }
 

@@ -36,6 +36,7 @@ type setFn func(string, string) error
 type Setting struct {
 	name        string
 	set         func(config.MinikubeConfig, string, string) error
+	setMap      func(config.MinikubeConfig, string, map[string]interface{}) error
 	validations []setFn
 	callbacks   []setFn
 }
@@ -112,12 +113,20 @@ var settings = []Setting{
 		set:  SetBool,
 	},
 	{
+		name: config.WantNoneDriverWarning,
+		set:  SetBool,
+	},
+	{
 		name: config.MachineProfile,
 		set:  SetString,
 	},
 	{
 		name: Bootstrapper,
 		set:  SetString, //TODO(r2d4): more validation here?
+	},
+	{
+		name: config.ShowBootstrapperDeprecationNotification,
+		set:  SetBool,
 	},
 	{
 		name:        "dashboard",
@@ -180,10 +189,40 @@ var settings = []Setting{
 		callbacks:   []setFn{EnableOrDisableAddon},
 	},
 	{
+		name:        "freshpod",
+		set:         SetBool,
+		validations: []setFn{IsValidAddon},
+		callbacks:   []setFn{EnableOrDisableAddon},
+	},
+	{
 		name:        "default-storageclass",
 		set:         SetBool,
 		validations: []setFn{IsValidAddon},
 		callbacks:   []setFn{EnableOrDisableDefaultStorageClass},
+	},
+	{
+		name:        "storage-provisioner",
+		set:         SetBool,
+		validations: []setFn{IsValidAddon},
+		callbacks:   []setFn{EnableOrDisableAddon},
+	},
+	{
+		name:        "metrics-server",
+		set:         SetBool,
+		validations: []setFn{IsValidAddon},
+		callbacks:   []setFn{EnableOrDisableAddon},
+	},
+	{
+		name:        "nvidia-driver-installer",
+		set:         SetBool,
+		validations: []setFn{IsValidAddon},
+		callbacks:   []setFn{EnableOrDisableAddon},
+	},
+	{
+		name:        "nvidia-gpu-device-plugin",
+		set:         SetBool,
+		validations: []setFn{IsValidAddon},
+		callbacks:   []setFn{EnableOrDisableAddon},
 	},
 	{
 		name: "hyperv-virtual-switch",
@@ -192,6 +231,11 @@ var settings = []Setting{
 	{
 		name: "disable-driver-mounts",
 		set:  SetBool,
+	},
+	{
+		name:   "cache",
+		set:    SetConfigMap,
+		setMap: SetMap,
 	},
 }
 
@@ -211,6 +255,73 @@ func configurableFields() string {
 		fields = append(fields, " * "+s.name)
 	}
 	return strings.Join(fields, "\n")
+}
+
+// ListConfigMap list entries from config file
+func ListConfigMap(name string) ([]string, error) {
+	configFile, err := config.ReadConfig()
+	if err != nil {
+		return nil, err
+	}
+	var images []string
+	if values, ok := configFile[name].(map[string]interface{}); ok {
+		for key := range values {
+			images = append(images, key)
+		}
+	}
+	return images, nil
+}
+
+// AddToConfigMap adds entries to a map in the config file
+func AddToConfigMap(name string, images []string) error {
+	s, err := findSetting(name)
+	if err != nil {
+		return err
+	}
+	// Set the values
+	configFile, err := config.ReadConfig()
+	if err != nil {
+		return err
+	}
+	newImages := make(map[string]interface{})
+	for _, image := range images {
+		newImages[image] = nil
+	}
+	if values, ok := configFile[name].(map[string]interface{}); ok {
+		for key := range values {
+			newImages[key] = nil
+		}
+	}
+	if err = s.setMap(configFile, name, newImages); err != nil {
+		return err
+	}
+	// Write the values
+	return WriteConfig(configFile)
+}
+
+// DeleteFromConfigMap deletes entries from a map in the config file
+func DeleteFromConfigMap(name string, images []string) error {
+	s, err := findSetting(name)
+	if err != nil {
+		return err
+	}
+	// Set the values
+	configFile, err := config.ReadConfig()
+	if err != nil {
+		return err
+	}
+	values, ok := configFile[name]
+	if !ok {
+		return nil
+	}
+	for _, image := range images {
+		delete(values.(map[string]interface{}), image)
+	}
+	if err = s.setMap(configFile, name, values.(map[string]interface{})); err != nil {
+		return err
+	}
+	// Write the values
+	return WriteConfig(configFile)
 }
 
 // WriteConfig writes a minikube config to the JSON file

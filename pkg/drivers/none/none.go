@@ -22,18 +22,21 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/golang/glog"
+
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/util/net"
 	pkgdrivers "k8s.io/minikube/pkg/drivers"
-	"k8s.io/minikube/pkg/minikube/constants"
 )
 
 const driverName = "none"
-const dockerkillcmd = `docker rm $(docker kill $(docker ps -a --filter="name=k8s_" --format="{{.ID}}"))`
-const dockerstopcmd = `docker stop $(docker ps -a --filter="name=k8s_" --format="{{.ID}}")`
+const dockerstopcmd = `docker kill $(docker ps -a --filter="name=k8s_" --format="{{.ID}}")`
 
-// none Driver is a driver designed to run localkube w/o a VM
+var dockerkillcmd = fmt.Sprintf(`docker rm $(%s)`, dockerstopcmd)
+
+// none Driver is a driver designed to run kubeadm w/o a VM
 type Driver struct {
 	*drivers.BaseDriver
 	*pkgdrivers.CommonDriver
@@ -49,7 +52,7 @@ func NewDriver(hostName, storePath string) *Driver {
 	}
 }
 
-// PreCreateCheck checks for correct priviledges and dependencies
+// PreCreateCheck checks for correct privileges and dependencies
 func (d *Driver) PreCreateCheck() error {
 	// check that docker is on path
 	_, err := exec.LookPath("docker")
@@ -72,7 +75,11 @@ func (d *Driver) DriverName() string {
 }
 
 func (d *Driver) GetIP() (string, error) {
-	return "127.0.0.1", nil
+	ip, err := net.ChooseBindAddress(nil)
+	if err != nil {
+		return "", err
+	}
+	return ip.String(), nil
 }
 
 func (d *Driver) GetSSHHostname() (string, error) {
@@ -84,20 +91,17 @@ func (d *Driver) GetSSHPort() (int, error) {
 }
 
 func (d *Driver) GetURL() (string, error) {
-	return "tcp://127.0.0.1:2376", nil
+	ip, err := d.GetIP()
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("tcp://%s:2376", ip), nil
 }
 
 func (d *Driver) GetState() (state.State, error) {
-	var statuscmd = fmt.Sprintf("if [[ `systemctl` =~ -\\.mount ]] &>/dev/null; "+`then
-  sudo systemctl is-active localkube &>/dev/null && echo "Running" || echo "Stopped"
-else
-  if ps $(cat %s) &>/dev/null; then
-    echo "Running"
-  else
-    echo "Stopped"
-  fi
-fi
-`, constants.LocalkubePIDPath)
+	var statuscmd = fmt.Sprintf(
+		`sudo systemctl is-active kubelet &>/dev/null && echo "Running" || echo "Stopped"`)
 
 	out, err := runCommand(statuscmd, true)
 	if err != nil {
@@ -109,39 +113,45 @@ fi
 	} else if state.Stopped.String() == s {
 		return state.Stopped, nil
 	} else {
-		return state.None, fmt.Errorf("Error: Unrecognize output from GetLocalkubeStatus: %s", s)
+		return state.None, fmt.Errorf("Error: Unrecognize output from GetState: %s", s)
 	}
 }
 
 func (d *Driver) Kill() error {
-	cmd := exec.Command("sudo", "systemctl", "stop", "localkube.service")
-	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "stopping the localkube service")
-	}
-	cmd = exec.Command("sudo", "rm", "-rf", "/var/lib/localkube")
-	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "removing localkube")
+	for _, cmdStr := range [][]string{
+		{"systemctl", "stop", "kubelet.service"},
+		{"rm", "-rf", "/var/lib/minikube"},
+	} {
+		cmd := exec.Command("sudo", cmdStr...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			glog.Warningf("Error %s running command: %s. Output: %s", err, cmdStr, string(out))
+		}
 	}
 	return nil
 }
 
 func (d *Driver) Remove() error {
-	cmd := exec.Command("sudo", "systemctl", "stop", "localkube.service")
-	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "stopping localkube service")
-	}
-	cmd = exec.Command("sudo", "rm", "-rf", "/var/lib/localkube")
-	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "removing localkube")
+	rmCmd := `sudo systemctl stop kubelet.service
+	sudo rm -rf /data/minikube
+	sudo rm -rf /etc/kubernetes/manifests
+	sudo rm -rf /var/lib/minikube || true`
 
+	for _, cmdStr := range []string{rmCmd, dockerkillcmd} {
+		if out, err := runCommand(cmdStr, true); err != nil {
+			glog.Warningf("Error %s running command: %s, Output: %s", err, cmdStr, out)
+		}
 	}
-	runCommand(dockerkillcmd, false)
 
 	return nil
 }
 
 func (d *Driver) Restart() error {
-	cmd := exec.Command("sudo", "systemctl", "restart", "localkube.service")
+	restartCmd := `
+	if systemctl is-active kubelet.service; then
+		sudo systemctl restart kubelet.service
+	fi`
+
+	cmd := exec.Command(restartCmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -149,18 +159,25 @@ func (d *Driver) Restart() error {
 }
 
 func (d *Driver) Start() error {
-	d.IPAddress = "127.0.0.1"
-	d.URL = "127.0.0.1:8080"
+	var err error
+	d.IPAddress, err = d.GetIP()
+	if err != nil {
+		return err
+	}
+	d.URL, err = d.GetURL()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (d *Driver) Stop() error {
-	var stopcmd = fmt.Sprintf("if [[ `systemctl` =~ -\\.mount ]] &>/dev/null; "+`then
-  sudo systemctl stop localkube.service
-else
-	sudo kill $(cat %s)
+	var stopcmd = fmt.Sprintf("if [[ `systemctl` =~ -\\.mount ]] &>/dev/null; " + `then
+for svc in "kubelet"; do
+	sudo systemctl stop "$svc".service || true
+done
 fi
-`, constants.LocalkubePIDPath)
+`)
 	_, err := runCommand(stopcmd, false)
 	if err != nil {
 		return err
@@ -174,7 +191,9 @@ fi
 			break
 		}
 	}
-	runCommand(dockerstopcmd, false)
+	if out, err := runCommand(dockerstopcmd, false); err != nil {
+		glog.Warningf("Error %s running command %s. Output: %s", err, dockerstopcmd, out)
+	}
 	return nil
 }
 

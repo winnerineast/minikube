@@ -22,15 +22,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/user"
+	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/log"
 	"github.com/docker/machine/libmachine/state"
+	nfsexports "github.com/johanneswuerbach/nfsexports"
 	hyperkit "github.com/moby/hyperkit/go"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	pkgdrivers "k8s.io/minikube/pkg/drivers"
 	commonutil "k8s.io/minikube/pkg/util"
@@ -40,6 +44,9 @@ const (
 	isoFilename     = "boot2docker.iso"
 	pidFileName     = "hyperkit.pid"
 	machineFileName = "hyperkit.json"
+	permErr         = "%s needs to run with elevated permissions. " +
+		"Please run the following command, then try again: " +
+		"sudo chown root:wheel %s && sudo chmod u+s %s"
 )
 
 type Driver struct {
@@ -50,6 +57,11 @@ type Driver struct {
 	CPU            int
 	Memory         int
 	Cmdline        string
+	NFSShares      []string
+	NFSSharesRoot  string
+	UUID           string
+	VpnKitSock     string
+	VSockPorts     []string
 }
 
 func NewDriver(hostName, storePath string) *Driver {
@@ -61,6 +73,20 @@ func NewDriver(hostName, storePath string) *Driver {
 	}
 }
 
+// PreCreateCheck is called to enforce pre-creation steps
+func (d *Driver) PreCreateCheck() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	if syscall.Geteuid() != 0 {
+		return fmt.Errorf(permErr, filepath.Base(exe), exe, exe)
+	}
+
+	return nil
+}
+
 func (d *Driver) Create() error {
 	// TODO: handle different disk types.
 	if err := pkgdrivers.MakeDiskImage(d.BaseDriver, d.Boot2DockerURL, d.DiskSize); err != nil {
@@ -69,7 +95,7 @@ func (d *Driver) Create() error {
 
 	isoPath := d.ResolveStorePath(isoFilename)
 	if err := d.extractKernel(isoPath); err != nil {
-		return err
+		return errors.Wrap(err, "extracting kernel")
 	}
 
 	return d.Start()
@@ -141,9 +167,9 @@ func (d *Driver) Restart() error {
 
 // Start a host
 func (d *Driver) Start() error {
-	h, err := hyperkit.New("", "", filepath.Join(d.StorePath, "machines", d.MachineName))
+	h, err := hyperkit.New("", d.VpnKitSock, filepath.Join(d.StorePath, "machines", d.MachineName))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "new-ing Hyperkit")
 	}
 
 	// TODO: handle the rest of our settings.
@@ -154,13 +180,19 @@ func (d *Driver) Start() error {
 	h.Console = hyperkit.ConsoleFile
 	h.CPUs = d.CPU
 	h.Memory = d.Memory
+	h.UUID = d.UUID
 
-	// Set UUID
-	h.UUID = uuid.NewUUID().String()
-	log.Infof("Generated UUID %s", h.UUID)
+	if vsockPorts, err := d.extractVSockPorts(); err != nil {
+		return err
+	} else if len(vsockPorts) >= 1 {
+		h.VSock = true
+		h.VSockPorts = vsockPorts
+	}
+
+	log.Infof("Using UUID %s", h.UUID)
 	mac, err := GetMACAddressFromUUID(h.UUID)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "getting MAC address from UUID")
 	}
 
 	// Need to strip 0's
@@ -175,7 +207,7 @@ func (d *Driver) Start() error {
 	}
 	log.Infof("Starting with cmdline: %s", d.Cmdline)
 	if err := h.Start(d.Cmdline); err != nil {
-		return err
+		return errors.Wrapf(err, "starting with cmd line: %s", d.Cmdline)
 	}
 
 	getIP := func() error {
@@ -190,11 +222,24 @@ func (d *Driver) Start() error {
 	if err := commonutil.RetryAfter(30, getIP, 2*time.Second); err != nil {
 		return fmt.Errorf("IP address never found in dhcp leases file %v", err)
 	}
+
+	if len(d.NFSShares) > 0 {
+		log.Info("Setting up NFS mounts")
+		// takes some time here for ssh / nfsd to work properly
+		time.Sleep(time.Second * 30)
+		err = d.setupNFSShare()
+		if err != nil {
+			log.Errorf("NFS setup failed: %s", err.Error())
+			return err
+		}
+	}
+
 	return nil
 }
 
 // Stop a host gracefully
 func (d *Driver) Stop() error {
+	d.cleanupNfsExports()
 	return d.sendSignal(syscall.SIGTERM)
 }
 
@@ -213,6 +258,81 @@ func (d *Driver) extractKernel(isoPath string) error {
 		}
 	}
 	return nil
+}
+
+// InvalidPortNumberError implements the Error interface.
+// It is used when a VSockPorts port number cannot be recognised as an integer.
+type InvalidPortNumberError string
+
+// Error returns an Error for InvalidPortNumberError
+func (port InvalidPortNumberError) Error() string {
+	return fmt.Sprintf("vsock port '%s' is not an integer", string(port))
+}
+
+func (d *Driver) extractVSockPorts() ([]int, error) {
+	vsockPorts := make([]int, 0, len(d.VSockPorts))
+
+	for _, port := range d.VSockPorts {
+		p, err := strconv.Atoi(port)
+		if err != nil {
+			var err InvalidPortNumberError
+			err = InvalidPortNumberError(port)
+			return nil, err
+		}
+		vsockPorts = append(vsockPorts, p)
+	}
+
+	return vsockPorts, nil
+}
+
+func (d *Driver) setupNFSShare() error {
+	user, err := user.Current()
+	if err != nil {
+		return err
+	}
+
+	hostIP, err := GetNetAddr()
+	if err != nil {
+		return err
+	}
+
+	mountCommands := fmt.Sprintf("#/bin/bash\\n")
+	log.Info(d.IPAddress)
+
+	for _, share := range d.NFSShares {
+		if !path.IsAbs(share) {
+			share = d.ResolveStorePath(share)
+		}
+		nfsConfig := fmt.Sprintf("%s %s -alldirs -mapall=%s", share, d.IPAddress, user.Username)
+
+		if _, err := nfsexports.Add("", d.nfsExportIdentifier(share), nfsConfig); err != nil {
+			if strings.Contains(err.Error(), "conflicts with existing export") {
+				log.Info("Conflicting NFS Share not setup and ignored:", err)
+				continue
+			}
+			return err
+		}
+
+		root := d.NFSSharesRoot
+		mountCommands += fmt.Sprintf("sudo mkdir -p %s/%s\\n", root, share)
+		mountCommands += fmt.Sprintf("sudo mount -t nfs -o noacl,async %s:%s %s/%s\\n", hostIP, share, root, share)
+	}
+
+	if err := nfsexports.ReloadDaemon(); err != nil {
+		return err
+	}
+
+	writeScriptCmd := fmt.Sprintf("echo -e \"%s\" | sh", mountCommands)
+
+	if _, err := drivers.RunSSHCommandFromDriver(d, writeScriptCmd); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *Driver) nfsExportIdentifier(path string) string {
+	return fmt.Sprintf("minikube-hyperkit %s-%s", d.MachineName, path)
 }
 
 func (d *Driver) sendSignal(s os.Signal) error {
@@ -241,4 +361,19 @@ func (d *Driver) getPid() int {
 	}
 
 	return config.Pid
+}
+
+func (d *Driver) cleanupNfsExports() {
+	if len(d.NFSShares) > 0 {
+		log.Infof("You must be root to remove NFS shared folders. Please type root password.")
+		for _, share := range d.NFSShares {
+			if _, err := nfsexports.Remove("", d.nfsExportIdentifier(share)); err != nil {
+				log.Errorf("failed removing nfs share (%s): %s", share, err.Error())
+			}
+		}
+
+		if err := nfsexports.ReloadDaemon(); err != nil {
+			log.Errorf("failed to reload the nfs daemon: %s", err.Error())
+		}
+	}
 }

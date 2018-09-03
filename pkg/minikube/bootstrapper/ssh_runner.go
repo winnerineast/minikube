@@ -63,6 +63,17 @@ func (s *SSHRunner) Run(cmd string) error {
 	return sess.Run(cmd)
 }
 
+// CombinedOutputTo runs the command and stores both command
+// output and error to out.
+func (s *SSHRunner) CombinedOutputTo(cmd string, out io.Writer) error {
+	b, err := s.CombinedOutput(cmd)
+	if err != nil {
+		return errors.Wrapf(err, "running command: %s\n.", cmd)
+	}
+	_, err = out.Write([]byte(b))
+	return err
+}
+
 // CombinedOutput runs the command on the remote and returns its combined
 // standard output and standard error.
 func (s *SSHRunner) CombinedOutput(cmd string) (string, error) {
@@ -72,11 +83,12 @@ func (s *SSHRunner) CombinedOutput(cmd string) (string, error) {
 		return "", errors.Wrap(err, "getting ssh session")
 	}
 	defer sess.Close()
-	out, err := sess.CombinedOutput(cmd)
+
+	b, err := sess.CombinedOutput(cmd)
 	if err != nil {
-		return "", errors.Wrapf(err, "running command: %s\n output: %s", cmd, out)
+		return "", errors.Wrapf(err, "running command: %s\n.", cmd)
 	}
-	return string(out), nil
+	return string(b), nil
 }
 
 // Copy copies a file to the remote over SSH.
@@ -112,8 +124,9 @@ func (s *SSHRunner) Copy(f assets.CopyableFile) error {
 	}()
 
 	scpcmd := fmt.Sprintf("sudo scp -t %s", f.GetTargetDir())
-	if err := sess.Run(scpcmd); err != nil {
-		return errors.Wrapf(err, "Error running scp command: %s", scpcmd)
+	out, err := sess.CombinedOutput(scpcmd)
+	if err != nil {
+		return errors.Wrapf(err, "Error running scp command: %s output: %s", scpcmd, out)
 	}
 	wg.Wait()
 

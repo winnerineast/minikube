@@ -10,7 +10,7 @@
 [GoReport Status]: https://goreportcard.com/report/github.com/kubernetes/minikube
 [GoReport Widget]: https://goreportcard.com/badge/github.com/kubernetes/minikube
 
-[CodeCovResult]: https://codecov.io/gh/kubernetes/minikube 
+[CodeCovResult]: https://codecov.io/gh/kubernetes/minikube
 [CodeCovWidget]: https://codecov.io/gh/kubernetes/minikube/branch/master/graph/badge.svg
 
 <img src="https://github.com/kubernetes/minikube/raw/master/logo/logo.png" width="100">
@@ -27,31 +27,61 @@ brew cask install minikube
 
 ### Linux
 ```shell
-curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 && chmod +x minikube && sudo mv minikube /usr/local/bin/
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 && chmod +x minikube && sudo cp minikube /usr/local/bin/ && rm minikube
 ```
 
 ### Windows
+
+Hyper-V needs to be enabled. For Windows 10 this can only run on these versions:
+
+* Windows 10 Enterprise
+* Windows 10 Professional
+* Windows 10 Education
+
+#### Install with [Chocolatey](https://chocolatey.org/) (recommended):
+These commands must be run as administrator. To do this, open the Windows command line by typing 'cmd' in your start menu, right clicking it and choosing 'Run as administrator'.
+```shell
+choco install minikube
+```
+```shell
+choco install kubernetes-cli
+```
+ After it finished installing, close the current command line and restart. Minikube was added to your path automatically.
+
+ To start the minikube cluster, make sure you also have administrator rights.
+
+```shell
+minikube start
+ ```
+
+ You might have to specify the vm driver.
+ ```shell
+minikube start --vm-driver hyperv
+ ```
+
+#### Install manually
 Download the [minikube-windows-amd64.exe](https://storage.googleapis.com/minikube/releases/latest/minikube-windows-amd64.exe) file, rename it to `minikube.exe` and add it to your path.
 
-### Linux Continuous Integration with VM Support
+
+### Linux Continuous Integration without VM Support
 Example with kubectl installation:
 ```shell
-curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 && chmod +x minikube
-curl -Lo kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x kubectl
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 && chmod +x minikube && sudo cp minikube /usr/local/bin/ && rm minikube
+curl -Lo kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x kubectl && sudo cp kubectl /usr/local/bin/ && rm kubectl
 
 export MINIKUBE_WANTUPDATENOTIFICATION=false
 export MINIKUBE_WANTREPORTERRORPROMPT=false
 export MINIKUBE_HOME=$HOME
 export CHANGE_MINIKUBE_NONE_USER=true
-mkdir $HOME/.kube || true
+mkdir -p $HOME/.kube
 touch $HOME/.kube/config
 
 export KUBECONFIG=$HOME/.kube/config
-sudo -E ./minikube start --vm-driver=none
+sudo -E minikube start --vm-driver=none
 
 # this for loop waits until kubectl can access the api server that Minikube has created
 for i in {1..150}; do # timeout for 5 minutes
-   ./kubectl get po &> /dev/null
+   kubectl get po &> /dev/null
    if [ $? -ne 1 ]; then
       break
   fi
@@ -63,8 +93,11 @@ done
 
 ### Other Ways to Install
 
-* [Linux] [Arch Linux AUR](https://aur.archlinux.org/packages/minikube/)
-* [Windows] [Chocolatey](https://chocolatey.org/packages/Minikube)
+* [Linux]
+    * [Arch Linux AUR](https://aur.archlinux.org/packages/minikube/)
+    * [Fedora/CentOS/Red Hat COPR](https://copr.fedorainfracloud.org/coprs/antonpatsev/minikube-rpm/)
+    * [openSUSE/SUSE Linux Enterprise](https://build.opensuse.org/package/show/Virtualization:containers/minikube)
+* [Windows] Download the [minikube-windows-amd64.exe](https://storage.googleapis.com/minikube/releases/latest/minikube-windows-amd64.exe) file, rename it to `minikube.exe` and add it to your path.
 
 ### Minikube Version Management
 
@@ -75,10 +108,10 @@ We also released a Debian package and Windows installer on our [releases page](h
 ### Requirements
 * [kubectl](https://kubernetes.io/docs/tasks/kubectl/install/)
 * macOS
-    * [xhyve driver](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#xhyve-driver), [VirtualBox](https://www.virtualbox.org/wiki/Downloads), or [VMware Fusion](https://www.vmware.com/products/fusion)
+    * [Hyperkit driver](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperkit-driver), [xhyve driver](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#xhyve-driver), [VirtualBox](https://www.virtualbox.org/wiki/Downloads), or [VMware Fusion](https://www.vmware.com/products/fusion)
 * Linux
     * [VirtualBox](https://www.virtualbox.org/wiki/Downloads) or [KVM](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm-driver)
-    * **NOTE:** Minikube also supports a `--vm-driver=none` option that runs the Kubernetes components on the host and not in a VM. Docker is required to use this driver but no hypervisor.
+    * **NOTE:** Minikube also supports a `--vm-driver=none` option that runs the Kubernetes components on the host and not in a VM. Docker is required to use this driver but no hypervisor. If you use `--vm-driver=none`, be sure to specify a [bridge network](https://docs.docker.com/network/bridge/#configure-the-default-bridge-network) for docker. Otherwise it might change between network restarts, causing loss of connectivity to your cluster.
 * Windows
     * [VirtualBox](https://www.virtualbox.org/wiki/Downloads) or [Hyper-V](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperV-driver)
 * VT-x/AMD-v virtualization must be enabled in BIOS
@@ -92,9 +125,11 @@ the following drivers:
 
 * virtualbox
 * vmwarefusion
-* [KVM](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm-driver)
+* [KVM2](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm2-driver)
+* [KVM (deprecated in favor of KVM2)](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm-driver)
+* [hyperkit](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperkit-driver)
 * [xhyve](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#xhyve-driver)
-* [Hyper-V](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperV-driver)
+* [hyperv](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#hyperV-driver)
 * none (**Linux-only**) - this driver can be used to run the Kubernetes cluster components on the host instead of in a VM. This can be useful for CI workloads which do not support nested virtualization.
 
 ```shell
@@ -108,7 +143,7 @@ Connecting to cluster...
 Setting up kubeconfig...
 Kubectl is now configured to use the cluster.
 
-$ kubectl run hello-minikube --image=gcr.io/google_containers/echoserver:1.4 --port=8080
+$ kubectl run hello-minikube --image=k8s.gcr.io/echoserver:1.4 --port=8080
 deployment "hello-minikube" created
 $ kubectl expose deployment hello-minikube --type=NodePort
 service "hello-minikube" exposed
@@ -130,6 +165,8 @@ client_address=192.168.99.1
 command=GET
 real path=/
 ...
+$ kubectl delete service hello-minikube
+service "hello-minikube" deleted
 $ kubectl delete deployment hello-minikube
 deployment "hello-minikube" deleted
 $ minikube stop
@@ -141,7 +178,7 @@ Machine stopped.
 
 ### kubectl
 
-The `minikube start` command creates a "[kubectl context](https://kubernetes.io/docs/user-guide/kubectl/v1.7/#-em-set-context-em-)" called "minikube".
+The `minikube start` command creates a "[kubectl context](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#-em-set-context-em-)" called "minikube".
 This context contains the configuration to communicate with your Minikube cluster.
 
 Minikube sets this context to default automatically, but if you need to switch back to it in the future, run:
@@ -166,7 +203,7 @@ minikube service [-n NAMESPACE] [--url] NAME
 
 ## Design
 
-Minikube uses [libmachine](https://github.com/docker/machine/tree/master/libmachine) for provisioning VMs, and [localkube](https://github.com/kubernetes/minikube/tree/master/pkg/localkube) (originally written and donated to this project by [Redspread](https://redspread.com/)) for running the cluster.
+Minikube uses [libmachine](https://github.com/docker/machine/tree/master/libmachine) for provisioning VMs, and [kubeadm](https://github.com/kubernetes/kubeadm) to provision a kubernetes cluster
 
 For more information about Minikube, see the [proposal](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/cluster-lifecycle/local-cluster-ux.md).
 
@@ -179,5 +216,5 @@ For more information about Minikube, see the [proposal](https://github.com/kuber
 ## Community
 
 * [**#minikube on Kubernetes Slack**](https://kubernetes.slack.com)
-* [**kubernetes-dev mailing list** ](https://groups.google.com/forum/#!forum/kubernetes-dev)
+* [**kubernetes-users mailing list** ](https://groups.google.com/forum/#!forum/kubernetes-users)
 (If you are posting to the list, please prefix your subject with "minikube: ")

@@ -9,11 +9,11 @@ See [this PR](https://github.com/kubernetes/minikube/pull/164) for an example.
 
 This step isn't always required. Check if there were changes in the deploy directory.
 If you do this, bump the ISO URL to point to the new ISO, and send a PR.
-To do this, build the new iso by running:
+To do this, build the new ISO by running:
 ```shell
 deploy/iso/build.sh
 ```
-This will generate a new iso at 'deploy/iso/minikube.iso'.  Then upload the iso and shasum using the following command:
+This will generate a new ISO at 'deploy/iso/minikube.iso'.  Then upload the ISO and shasum using the following command:
 ```shell
 gsutil cp deploy/iso/minikube.iso gs://minikube/minikube-<increment.version>.iso
 gsutil cp deploy/iso/minikube.iso.sha256 gs://minikube/minikube-<increment.version>.iso.sha256
@@ -100,10 +100,7 @@ These are downstream packages that are being maintained by others and how to upg
 | Package Manager | URL | TODO |
 | --- | --- | --- |
 | Arch Linux AUR | https://aur.archlinux.org/packages/minikube/ | "Flag as package out-of-date"
-| Brew Cask | https://github.com/caskroom/homebrew-cask/blob/master/Casks/minikube.rb | Create a new PR in [caskroom/homebrew-cask](https://github.com/caskroom/homebrew-cask) with an updated version and appcast checkpoint
-
-#### [How to Generate an Appcast Checkpoint for Homebrew](https://github.com/caskroom/homebrew-cask/blob/master/doc/cask_language_reference/stanzas/appcast.md)
-`curl --compressed --location --user-agent 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.152 Safari/537.36' "https://github.com/kubernetes/minikube/releases.atom" | sed 's|<pubDate>[^<]*</pubDate>||g' | shasum --algorithm 256`
+| Brew Cask | https://github.com/Homebrew/homebrew-cask/blob/master/Casks/minikube.rb | Create a new PR in [Homebrew/homebrew-cask](https://github.com/Homebrew/homebrew-cask) with an updated version and SHA256
 
 #### Updating the arch linux package
 The Arch Linux AUR is maintained at https://aur.archlinux.org/packages/minikube/.  The installer PKGBUILD is hosted in its own repository.  The public read-only repository is hosted here `https://aur.archlinux.org/minikube.git` and the private read-write repository is hosted here `ssh://aur@aur.archlinux.org/minikube.git`

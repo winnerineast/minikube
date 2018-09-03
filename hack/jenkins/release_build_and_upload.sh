@@ -37,17 +37,9 @@ cat Makefile | grep "VERSION_BUILD ?=" | grep $VERSION_BUILD
 
 # Build and upload
 BUILD_IN_DOCKER=y make -j 16 all out/minikube-installer.exe out/minikube_${DEB_VERSION}.deb
+make checksum
+
 gsutil -m cp out/* gs://$BUCKET/releases/$TAGNAME/
 
 # Bump latest
 gsutil cp -r gs://$BUCKET/releases/$TAGNAME/* gs://$BUCKET/releases/latest/
-
-# Upload localkube containers
-TAG="$(docker images "gcr.io/k8s-minikube/localkube-image" --format="{{.Tag}}" | head -n 1)"
-gcloud docker -- push gcr.io/k8s-minikube/localkube-image:$TAG
-
-TAG="$(docker images "gcr.io/k8s-minikube/localkube-dind-image" --format="{{.Tag}}" | head -n 1)"
-gcloud docker -- push gcr.io/k8s-minikube/localkube-dind-image:$TAG
-
-TAG="$(docker images "gcr.io/k8s-minikube/localkube-dind-image-devshell" --format="{{.Tag}}" | head -n 1)"
-gcloud docker -- push gcr.io/k8s-minikube/localkube-dind-image-devshell:$TAG

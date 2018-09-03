@@ -19,9 +19,11 @@ limitations under the License.
 package integration
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,15 +49,25 @@ func testDashboard(t *testing.T) {
 	t.Parallel()
 	minikubeRunner := NewMinikubeRunner(t)
 
-	if err := util.WaitForDashboardRunning(t); err != nil {
-		t.Fatalf("waiting for dashboard to be up: %s", err)
+	var u *url.URL
+
+	checkDashboard := func() error {
+		var err error
+		dashboardURL := minikubeRunner.RunCommand("dashboard --url", false)
+		if dashboardURL == "" {
+			return errors.New("error getting dashboard URL")
+		}
+		u, err = url.Parse(strings.TrimSpace(dashboardURL))
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
-	dashboardURL := minikubeRunner.RunCommand("dashboard --url", true)
-	u, err := url.Parse(strings.TrimSpace(dashboardURL))
-	if err != nil {
-		t.Fatalf("failed to parse dashboard URL %s: %v", dashboardURL, err)
+	if err := util.Retry(t, checkDashboard, 2*time.Second, 60); err != nil {
+		t.Fatalf("error checking dashboard URL: %s", err)
 	}
+
 	if u.Scheme != "http" {
 		t.Fatalf("wrong scheme in dashboard URL, expected http, actual %s", u.Scheme)
 	}
@@ -66,6 +78,53 @@ func testDashboard(t *testing.T) {
 	if port != "30000" {
 		t.Fatalf("Dashboard is exposed on wrong port, expected 30000, actual %s", port)
 	}
+}
+
+func testIngressController(t *testing.T) {
+	t.Parallel()
+	minikubeRunner := NewMinikubeRunner(t)
+	kubectlRunner := util.NewKubectlRunner(t)
+
+	minikubeRunner.RunCommand("addons enable ingress", true)
+	if err := util.WaitForIngressControllerRunning(t); err != nil {
+		t.Fatalf("waiting for ingress-controller to be up: %s", err)
+	}
+
+	if err := util.WaitForIngressDefaultBackendRunning(t); err != nil {
+		t.Fatalf("waiting for default-http-backend to be up: %s", err)
+	}
+
+	ingressPath, _ := filepath.Abs("testdata/nginx-ing.yaml")
+	if _, err := kubectlRunner.RunCommand([]string{"create", "-f", ingressPath}); err != nil {
+		t.Fatalf("creating nginx ingress resource: %s", err)
+	}
+
+	podPath, _ := filepath.Abs("testdata/nginx-pod-svc.yaml")
+	if _, err := kubectlRunner.RunCommand([]string{"create", "-f", podPath}); err != nil {
+		t.Fatalf("creating nginx ingress resource: %s", err)
+	}
+
+	if err := util.WaitForNginxRunning(t); err != nil {
+		t.Fatalf("waiting for nginx to be up: %s", err)
+	}
+
+	checkIngress := func() error {
+		expectedStr := "Welcome to nginx!"
+		runCmd := fmt.Sprintf("curl http://127.0.0.1:80 -H 'Host: nginx.example.com'")
+		sshCmdOutput, _ := minikubeRunner.SSH(runCmd)
+		if !strings.Contains(sshCmdOutput, expectedStr) {
+			return fmt.Errorf("ExpectedStr sshCmdOutput to be: %s. Output was: %s", expectedStr, sshCmdOutput)
+		}
+		return nil
+	}
+
+	if err := util.Retry(t, checkIngress, 3*time.Second, 5); err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	defer kubectlRunner.RunCommand([]string{"delete", "-f", podPath})
+	defer kubectlRunner.RunCommand([]string{"delete", "-f", ingressPath})
+	minikubeRunner.RunCommand("addons disable ingress", true)
 }
 
 func testServicesList(t *testing.T) {
